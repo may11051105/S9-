@@ -166,6 +166,14 @@ scroll-behavior: smooth;/* 平滑滾動效果 */
         border-color: var(--bg3);
         box-shadow: 0 0 0 2px rgba(52, 128, 83, 0.12);
       }
+      .search-count {
+        flex: 0 0 auto;
+        min-width: 58px;
+        color: var(--bg3);
+        font-size: 0.72rem;
+        white-space: nowrap;
+        text-align: right;
+      }
 
 /* =========================
 *主分類頁籤 Main Tabs
@@ -662,8 +670,8 @@ scroll-behavior: smooth;/* 平滑滾動效果 */
 
 }
 
-
 </style>
+
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
@@ -698,31 +706,20 @@ scroll-behavior: smooth;/* 平滑滾動效果 */
               title="統計表">
               ⚔高手戰力
             </button>
-            <a
-              href="https://may11051105.github.io/jy100/"
-              target="_blank"
-              class="header-btn"
-              title="百分百金庸商城"
-              >江湖補給</a>
+            <a href="https://may11051105.github.io/jy100/"
+              target="_blank" class="header-btn" title="百分百金庸商城">江湖補給</a>
           </div>
         </header>
 
         <div class="player-box">
           <label for="player-name">👤大俠尊名</label>
-          <input
-            type="text"
-            id="player-name"
+          <input type="text" id="player-name"
             placeholder="敢問大俠尊姓大名"
-            maxlength="10"
-            autocomplete="off"/>
-          <button
-            class="header-btn"
-            onclick="document.getElementById('import-file').click()">
+            maxlength="10" autocomplete="off"/>
+          <button class="header-btn" onclick="document.getElementById('import-file').click()">
             📤匯入JSON
           </button>
-          <input
-            type="file"
-            id="import-file"
+          <input type="file" id="import-file"
             accept=".json"
             style="display: none"
             onchange="importDataBackup(event)"/>
@@ -734,12 +731,10 @@ scroll-behavior: smooth;/* 平滑滾動效果 */
             id="role-select"
             onchange="handleRoleSelect(this.value)"
           ></select>
-          <input
-            type="search"
-            id="pill-search"
+          <input type="search" id="pill-search"
             placeholder="🔎 搜尋關鍵字..."
-            autocomplete="off"
-          />
+            autocomplete="off"/>
+          <span id="pill-search-count" class="search-count" aria-live="polite"></span>
         </div>
 
         <nav class="main-nav">
@@ -1113,24 +1108,74 @@ highlightText.style.writingMode = 'vertical-rl'//直行
 
 
 // ==============================================
+// 全域搜尋：比對卡片所有欄位與可見效果
+// ==============================================
+//-格式化搜尋文字
+function normalizeSearchText(value) {
+  return String(value ?? '')
+    .toLocaleLowerCase('zh-TW')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+//--索引卡片本身的實際欄位值；主分類與小分類只負責篩選畫面，
+function getItemSearchText(item) {
+  if (!item || typeof item !== 'object') return ''
+  // 排除非卡片內容，避免分類名稱觸發整個分類的卡片。
+  const excludedSearchFields = new Set(['主分類', '小分類'])
+  const rawValues = Object.entries(item)
+    .filter(([key]) => !excludedSearchFields.has(key))
+    .map(([, value]) => value)
+    .filter((value) => {
+      if (value === null || value === undefined) return false
+      if (typeof value === 'number') return value !== 0
+      return String(value).trim() !== ''
+    })
+
+  // 只加入有實際數值的屬性名稱，並保留畫面上真正會顯示的效果文字。
+  const activeAttributeLabels = ATTRIBUTES_MAP.flatMap((attribute) => {
+    const value = item[attribute.key]
+    if (value === null || value === undefined || value === '' || Number(value) === 0) {
+      return []}
+    return [attribute.short, attribute.full, attribute.key]
+  })
+  const visibleEffects = typeof getItemEffects === 'function'
+    ? getItemEffects(item): []
+  return normalizeSearchText([
+    ...rawValues,
+    ...activeAttributeLabels,
+    ...visibleEffects,
+  ].join(' '))
+}
+//--搜尋結果筆數
+function updateSearchResultCount(count, query = pillSearchText) {
+  const countElement = document.getElementById('pill-search-count')
+  if (!countElement) return
+  countElement.textContent = query
+    ? `共 ${count} 筆`: ''}
+//--搜尋引擎
+function searchBattleItems(query) {
+  const keyword = normalizeSearchText(query)
+  if (!keyword) return []
+  return battleDB.filter((item) => getItemSearchText(item).includes(keyword))
+}
+
+// ==============================================
 // 分派工作: 渲染 → 產生列表
 // ==============================================
 function renderBattleItems(mainCategory, subCategory) {
 const container = document.getElementById('battle-items')
 if (!container) return
 container.innerHTML = ''
+
 let items = []
 if (pillSearchText) {
-items = battleDB.filter((item) => {
-const name = String(item.名稱 || '').trim()
-return name.toLowerCase().includes(pillSearchText)
-})
+items = searchBattleItems(pillSearchText)
 } else {
 items = battleDB.filter((item) =>
 String(item.主分類 || '').trim() === mainCategory &&
-String(item.小分類 || '').trim() === subCategory,
-)
+String(item.小分類 || '').trim() === subCategory, )
 }
+updateSearchResultCount(items.length)
 if (!items || items.length === 0) {
 container.innerHTML = `<div class="card" style="text-align:center; padding:20px;">⚠️ 載入資料中</div>`
 return
@@ -1169,19 +1214,16 @@ if (subCategoryTypes.includes('TYPE_Y') && !pillSearchText) {
 if (subCategoryTypes.includes('NUMBER') || pillSearchText) {
   items.forEach((item) => {
     const limit = String(item.上限 || '').trim()
-    if (pillSearchText ||/^\d+(?:\.\d+)?$/.test(limit)
-    ) {
+    if (pillSearchText ||/^\d+(?:\.\d+)?$/.test(limit) ) {
       const card = renderNormalPillCard(item)
-      container.appendChild(card)
-    }
-
+      container.appendChild(card) }
   })
 }
-        }
+}
 
 
-      //--渲染: 一般丹藥 (純數)
-      function renderNormalPillCard(item) {
+//--渲染: 一般丹藥 (純數)
+function renderNormalPillCard(item) {
         const name = String(item.名稱 || '無資料')
         const limit = parseMaxLimit(item.上限) || 0
         const main = String(item.主分類 || '')
@@ -1222,29 +1264,24 @@ if (subCategoryTypes.includes('NUMBER') || pillSearchText) {
         if (input) {
           input.addEventListener('change', function () {
             let value = Number(this.value) || 0
-
             if (limit > 0) {
-              value = Math.max(0, Math.min(value, limit))
-            }
-
+              value = Math.max(0, Math.min(value, limit)) }
             this.value = value
-
             ensurePlayerName()
             playerRecord.pills[pillKey] = value
             savePlayerRecord()
-
             card.querySelector('.pill-total').textContent =
-              calculateTotalEffects(item, value)
+            calculateTotalEffects(item, value)
 
             // 未滿丹高亮即時刷新
-            if (typeof window.__refreshSubHighlight === 'function') {
-              window.__refreshSubHighlight()
-            }
+            if (typeof window.__refreshSubHighlight === 'function') 
+            { window.__refreshSubHighlight() }
           })
         }
 
         return card
       }
+
 
 // ==============================================
 // 渲染：卡片 Y 手動輸入／比例換算型
@@ -1304,14 +1341,14 @@ function generateSubYTableRowsHtml(itemsStatus) {
   >
   <span style="font-size:0.8rem;">/${item.maxValue}</span>
 </td>
-              </tr>`,)
+         </tr>`,)
           .join('')
       }
 
-      // ==============================================
-      // Y 型輸入事件
-      // ==============================================
-      function bindYInputEvents(card, mainCategory, subCategory) {
+// ==============================================
+// Y 型輸入事件
+// ==============================================
+function bindYInputEvents(card, mainCategory, subCategory) {
         card.querySelectorAll('.y-value-input').forEach((input) => {
           input.addEventListener('change', function () {
             let value = Number(this.value) || 0
@@ -1322,51 +1359,30 @@ function generateSubYTableRowsHtml(itemsStatus) {
             ensurePlayerName()
             playerRecord.pills[savedKey] = value
             savePlayerRecord()
-
             const updatedResult =
-              calculateSubCategoryYStats(
-                mainCategory,
-                subCategory,
-              )
-
-            card.querySelector('.y-summary-text').textContent =
+              calculateSubCategoryYStats(mainCategory,subCategory,)
+              card.querySelector('.y-summary-text').textContent =
               updatedResult.summaryText
-
-            card.querySelector('.y-tbody').innerHTML =
-              generateSubYTableRowsHtml(
-                updatedResult.itemsStatus,
-              )
-
-            bindYInputEvents(
-              card,
-              mainCategory,
-              subCategory,
-            )
-
+              card.querySelector('.y-tbody').innerHTML =
+              generateSubYTableRowsHtml(updatedResult.itemsStatus,)
+              bindYInputEvents(card,mainCategory,subCategory,)
             // 未滿丹高亮即時刷新
-            if (typeof window.__refreshSubHighlight === 'function') {
-              window.__refreshSubHighlight()
-            }
+            if (typeof window.__refreshSubHighlight === 'function') 
+            { window.__refreshSubHighlight() }
           })
         })
       }
 
 
 
-
-      //--渲染：卡片 # 收集／累計門檻型
-      function renderThresholdCard(mainCategory, subCategory) {
+//--渲染：卡片 # 收集／累計門檻型
+function renderThresholdCard(mainCategory, subCategory) {
         const savedKey = `THRESHOLD__${mainCategory}__${subCategory}`
         const currentAmount = Number(playerRecord.pills[savedKey]) || 0
         const result = calculateThresholdStats(
-  mainCategory,
-  subCategory,
-  currentAmount,
-)
-
+  mainCategory,subCategory,currentAmount,)
         const card = document.createElement('div')
         card.className = 'card'
-
         card.innerHTML = `
           <div class="threshold-summary-box">
             <strong>✨${subCategory} 當前累計：</strong><br>
@@ -1403,105 +1419,66 @@ function generateSubYTableRowsHtml(itemsStatus) {
           input.addEventListener('input', function () {
             let val = Number(this.value) || 0
             // 取得該分類的門檻上限
-            const maxThreshold =
-  getMaxThresholdForSubCategory(
-    mainCategory,
-    subCategory,
-  )
-
+            const maxThreshold = getMaxThresholdForSubCategory(
+    mainCategory,subCategory,)
             if (maxThreshold > 0) {
-              val = Math.max(0, Math.min(val, maxThreshold))
-            }
-
+              val = Math.max(0, Math.min(val, maxThreshold))}
             this.value = val
-
             ensurePlayerName()
-
             playerRecord.pills[savedKey] = val
             savePlayerRecord()
-
             const updatedResult =
-  calculateThresholdStats(
-    mainCategory,
-    subCategory,
-    val,
-  )
-
+  calculateThresholdStats(mainCategory,subCategory,val,)
             card.querySelector('#threshold-summary').textContent =
               updatedResult.summaryText
-
             card.querySelector('#threshold-table-body').innerHTML =
               generateTableRowsHtml(updatedResult.itemsStatus)
 
             // 未滿丹高亮即時刷新
             if (typeof window.__refreshSubHighlight === 'function') {
-              window.__refreshSubHighlight()
-            }
+              window.__refreshSubHighlight() }
           })
         }
-
         return card
       }
 
 //-- #. 從上限欄位解析 獲取純數字 (如: "#4" 或 "Y4" -> 4)
 function getThresholdValue(item) {
 const raw = String(item.上限 || '').replace(/[^0-9]/g, '')
-return Number(raw) || 0
-            }
+return Number(raw) || 0  }
 
 //-- #. 取得該分類中的#.卡片「最高門檻值」(例: 從 #1,#5,#24 中找出 24)
-function getMaxThresholdForSubCategory(
-  mainCategory,
-  subCategory,
+function getMaxThresholdForSubCategory( mainCategory,subCategory,
 ) {
   if (!mainCategory || !subCategory) return 0
-
-  const items = battleDB.filter(
-    (item) =>
+  const items = battleDB.filter((item) =>
       String(item.主分類 || '').trim() === mainCategory &&
       String(item.小分類 || '').trim() === subCategory &&
-      String(item.上限 || '').trim().startsWith('#'),
-  )
+      String(item.上限 || '').trim().startsWith('#'), )
 
   if (items.length === 0) return 0
-
   return Math.max(
-    ...items.map((item) => getThresholdValue(item)),
-  )
+    ...items.map((item) => getThresholdValue(item)), )
 }
 
 
 //-- #.卡片小計. 計算累計效果（自動解析符號）
 function calculateThresholdStats(
-  mainCategory,
-  subCategory,
-  currentAmount,
-) {
-  const thresholdItems = battleDB.filter(
-    (item) =>
+  mainCategory,subCategory,currentAmount, ) {
+  const thresholdItems = battleDB.filter((item) =>
       String(item.主分類 || '').trim() === mainCategory &&
       String(item.小分類 || '').trim() === subCategory &&
-      String(item.上限 || '').trim().startsWith('#'),
-  )
+      String(item.上限 || '').trim().startsWith('#'), )
 
   const activeStats = createEmptyStats()
-
-  thresholdItems.forEach((item) => {
+    thresholdItems.forEach((item) => {
     const threshold = getThresholdValue(item)
-
-    if (
-      currentAmount >= threshold &&
-      threshold > 0
+    if ( currentAmount >= threshold && threshold > 0
     ) {
       ATTRIBUTES_MAP.forEach((attr) => {
         const num = Number(item[attr.key])
-
-        if (
-          Number.isFinite(num) &&
-          num !== 0
-        ) {
-          activeStats[attr.key] += num
-        }
+        if ( Number.isFinite(num) && num !== 0
+        ) { activeStats[attr.key] += num }
       })
     }
   })
@@ -1509,38 +1486,17 @@ function calculateThresholdStats(
   const summaryText = Object.entries(activeStats)
     .filter(([_, val]) => val > 0)
     .map(([key, val]) => {
-      const attr = ATTRIBUTES_MAP.find(
-        (a) => a.key === key,
-      )
+      const attr = ATTRIBUTES_MAP.find( (a) => a.key === key, )
+      return attr ? formatEffect(attr.short, val): ''})
+    .filter(Boolean) .join(' ')
 
-      return attr
-        ? formatEffect(attr.short, val)
-        : ''
-    })
-    .filter(Boolean)
-    .join(' ')
-
-  return {
-    activeStats,
-
-    summaryText:
-      summaryText || '無屬性效果',
-
+  return {activeStats,
+    summaryText: summaryText || '無屬性效果',
     itemsStatus: thresholdItems.map((item) => {
-      const threshold =
-        getThresholdValue(item)
-
-      return {
-        name: item.名稱,
-        threshold: threshold,
-
-        isUnlocked:
-          currentAmount >= threshold &&
-          threshold > 0,
-
-        effectText:
-          getItemEffects(item).join(' '),
-      }
+      const threshold =getThresholdValue(item)
+      return {name: item.名稱,threshold: threshold,
+        isUnlocked:currentAmount >= threshold && threshold > 0,
+        effectText: getItemEffects(item).join(' '),}
     }),
   }
 }
@@ -1549,14 +1505,13 @@ function calculateThresholdStats(
 function generateTableRowsHtml(itemsStatus) {
               if (!itemsStatus || !Array.isArray(itemsStatus)) return ''
               return itemsStatus.map(
-                  (st) => `<tr style="color:${st.isUnlocked ? '#15803d' : '#94a3b8'};">
+              (st) => `<tr style="color:${st.isUnlocked ? '#15803d' : '#94a3b8'};">
       <td>${st.name}</td>
       <td>${st.effectText}</td>
       <td class="pill-state">${st.isUnlocked ? '✅解鎖' : '🔒未達'}</td>
-      </tr>`,
-                )
-                .join('')
-            }
+      </tr>`, )
+         .join('')
+}
 
 
 // ==============================================            
@@ -1640,7 +1595,6 @@ function calculateSubCategoryBStats(mainCategory, subCategory) {
   )
   const charactersMap = {}
               
-              
 rawItems.forEach((item) => {
   // 名稱 → 判斷群組名稱
  const baseName = parseCharacterGroupName(item.名稱)
@@ -1663,8 +1617,7 @@ charactersMap[baseName].levels[level] = item
 
 // 找群組的最高 B 值
 if (level > charactersMap[baseName].maxLevel) {
-      charactersMap[baseName].maxLevel = level
-    }
+      charactersMap[baseName].maxLevel = level}
   })
 const activeStats = createEmptyStats()
   const itemsStatus = Object.values(charactersMap).map((hero) => {
@@ -1680,7 +1633,6 @@ const activeStats = createEmptyStats()
       : (defaultData ? defaultData.名稱 : hero.name)
 
     let effectText = '未啟用 (0)'
-
     if (currentLevel > 0 && currentLevelData) {
       // 畫面：顯示這一等級的完整效果
       effectText = getItemEffects(currentLevelData).join(' ')
@@ -1688,13 +1640,9 @@ const activeStats = createEmptyStats()
       ATTRIBUTES_MAP.forEach((attr) => {
         const val = Number(currentLevelData[attr.key])
         if (Number.isFinite(val) && val !== 0) {
-          activeStats[attr.key] += val
-        }
+          activeStats[attr.key] += val}
       })
-
-      if (!effectText) {
-        effectText = `${currentLevel} 解鎖`
-      }
+      if (!effectText) {effectText = `${currentLevel} 解鎖`}
     }
 
     return {
@@ -1755,7 +1703,6 @@ function bindHeroInputEvents(card, mainCategory, subCategory) {
                   bindHeroInputEvents(card, mainCategory, subCategory)
 
                   if (typeof updateStatsModal === 'function') updateStatsModal()
-
                   // 未滿丹高亮即時刷新
                   if (typeof window.__refreshSubHighlight === 'function') {
                     window.__refreshSubHighlight()
@@ -1765,11 +1712,11 @@ function bindHeroInputEvents(card, mainCategory, subCategory) {
             }
 
 
-            function parseMaxLimit(limitStr) {
-              if (!limitStr) return 0
-              const match = String(limitStr).match(/\d+/)
-              return match ? parseInt(match[0], 10) : 0
-            }
+function parseMaxLimit(limitStr) {
+if (!limitStr) return 0
+const match = String(limitStr).match(/\d+/)
+return match ? parseInt(match[0], 10) : 0
+}
 
 
       // ==============================================
@@ -1777,60 +1724,39 @@ function bindHeroInputEvents(card, mainCategory, subCategory) {
       // 輸入目前累計值 → 按最大值比例換算目前效果
       // ==============================================
       function calculateSubCategoryYStats(mainCategory, subCategory) {
-        const rawItems = battleDB.filter(
-  (item) =>
+        const rawItems = battleDB.filter((item) =>
     String(item.主分類 || '').trim() === mainCategory &&
     String(item.小分類 || '').trim() === subCategory &&
-    String(item.上限 || '').trim().toUpperCase().startsWith('Y'),
-)
-
+    String(item.上限 || '').trim().toUpperCase().startsWith('Y'), )
         const activeStats = createEmptyStats()
-
         const itemsStatus = rawItems.map((item) => {
-          const name = String(item.名稱 || '').trim()
+        const name = String(item.名稱 || '').trim()
 
           // Y2500 → 2500
           const maxValue = parseMaxLimit(item.上限)
-
           const savedKey = `Y__${mainCategory}__${subCategory}__${name}`
           const currentValue = Number(playerRecord.pills[savedKey]) || 0
-
           const value = Math.max(0, Math.min(currentValue, maxValue))
-
           const effectParts = []
 
           ATTRIBUTES_MAP.forEach((attr) => {
             const maxEffect = Number(item[attr.key])
-
             if (!Number.isFinite(maxEffect) || maxEffect === 0) return
-
             // 目前值 / 最大值 × 最大效果
-            const currentEffect = cleanNumber(
-              (value / maxValue) * maxEffect,
-            )
-
+            const currentEffect = cleanNumber((value / maxValue) * maxEffect,)
             if (currentEffect !== 0) {
               activeStats[attr.key] += currentEffect
-
               // 小分類卡片名稱縮寫：爆、閃、反...
-              effectParts.push(
-                formatEffect(attr.short, currentEffect),
-              )
+              effectParts.push(formatEffect(attr.short, currentEffect),)
             }
           })
 
           // 其它功能只顯示，不加入戰力計算
           const otherFunction = String(item.其它功能 || '').trim()
-
-          if (otherFunction) {
-            effectParts.push(otherFunction)
-          }
-
+          if (otherFunction) {effectParts.push(otherFunction)}
           return {name,maxValue,currentValue: value,savedKey,
-            effectText:
-            effectParts.length > 0
-            ? effectParts.join(' '): '無效果',
-          }
+            effectText: effectParts.length > 0
+            ? effectParts.join(' '): '無效果',}
         })
 
         // Y 卡片上方小計
@@ -1839,17 +1765,13 @@ function bindHeroInputEvents(card, mainCategory, subCategory) {
           .map(([label, val]) => {
             const attr = ATTRIBUTES_MAP.find((a) => a.key === label)
             return attr
-              ? formatEffect(attr.short, val)
-              : ''
+              ? formatEffect(attr.short, val): ''
           })
-          .filter(Boolean)
-          .join(' ')
+          .filter(Boolean) .join(' ')
 
-        return {
-          activeStats,
+        return {activeStats,
           summaryText: summaryText || '無屬性效果',
-          itemsStatus,
-        }
+          itemsStatus,}
       }
 
 
@@ -1860,22 +1782,15 @@ function bindHeroInputEvents(card, mainCategory, subCategory) {
 // ==============================================
 const STORAGE_KEY = 'jin_pill_battle_record_multi'
 let multiPlayerDB = { currentRole: '', roles: {} }
-let playerRecord = {
-playerName: '',
-pills: {},
-playerStats: createEmptyStats(),
-}
+let playerRecord = {playerName: '',pills: {},playerStats: createEmptyStats(), }
 //-- 讀取紀錄
 function loadPlayerRecord() {
               try {
                 const saved = localStorage.getItem(STORAGE_KEY)
                 if (saved) {
                   const data = JSON.parse(saved)
-                  if (data && data.roles) multiPlayerDB = data
-                }
-              } catch (error) {
-                console.error('❌ 讀取紀錄失敗：', error)
-              }
+                  if (data && data.roles) multiPlayerDB = data }
+              } catch (error) {console.error('❌ 讀取紀錄失敗：', error) }
 
               // 如果先前有選取的角色，直接載入
               if (
@@ -1883,9 +1798,7 @@ function loadPlayerRecord() {
                 multiPlayerDB.roles[multiPlayerDB.currentRole]
               ) {
                 loadRoleData(multiPlayerDB.currentRole, false)
-              } else {
-                clearCurrentRecordUI()
-              }
+              } else {clearCurrentRecordUI() }
 }
 
             //-- 儲存目前角色 (自動儲存)
@@ -1894,17 +1807,13 @@ function loadPlayerRecord() {
                 const pName = playerRecord.playerName
                   ? playerRecord.playerName.trim()
                   : ''
-                if (pName) {
-                  multiPlayerDB.roles[pName] = JSON.parse(
-                    JSON.stringify(playerRecord),
-                  )
+                if (pName) {multiPlayerDB.roles[pName] = JSON.parse(
+                    JSON.stringify(playerRecord),  )
                   multiPlayerDB.currentRole = pName
                 }
                 localStorage.setItem(STORAGE_KEY, JSON.stringify(multiPlayerDB))
                 updateRoleSelectOptions()
-              } catch (error) {
-                console.error('❌ 儲存失敗：', error)
-              }
+              } catch (error) {console.error('❌ 儲存失敗：', error) }
             }
 
             //-- 渲染角色下拉選單（含 新增 與 刪除）
@@ -1949,7 +1858,6 @@ function loadPlayerRecord() {
 
               const nameInput = document.getElementById('player-name')
               if (nameInput) nameInput.value = playerRecord.playerName || ''
-
               updateRoleSelectOptions()
               refreshCurrentView() // 刷新畫面
               if (showToastMsg) showToast(`🔄 已切換至大俠：${roleName}`)
@@ -2043,11 +1951,8 @@ function loadPlayerRecord() {
                 multiPlayerDB.currentRole ||
                 (playerRecord.playerName ? playerRecord.playerName.trim() : '')
               if (!roleToDelete) return
-
-              if (
-                confirm(
-                  `⚠️ 確定踢除「${roleToDelete}」嗎？此動作無法復原！\n（建議先下載備份 (.json)）`,
-                )
+              if (confirm(
+                  `⚠️ 確定踢除「${roleToDelete}」嗎？此動作無法復原！\n（建議先下載備份 (.json)）`, )
               ) {
                 delete multiPlayerDB.roles[roleToDelete] //從紀錄中刪除
                 clearCurrentRecordUI() //清空資料重置畫面
@@ -2083,11 +1988,7 @@ function ensurePlayerName() {
 // ==============================================
 function calculatePlayerStats() {
   const stats = {}
-
-  ATTRIBUTES_MAP.forEach((attr) => {
-    stats[attr.key] = 0
-  })
-
+  ATTRIBUTES_MAP.forEach((attr) => {stats[attr.key] = 0 })
   const neededList = []
 
   // 1. 卡片一般丹藥
@@ -2096,11 +1997,8 @@ function calculatePlayerStats() {
     const main = String(item.主分類 || '')
     const sub = String(item.小分類 || '').trim()
     const limit = parseMaxLimit(item.上限) || 0
-
     const itemType = getSubCategoryType([item])
-
     if (!itemType.includes('NUMBER')) return
-
     const pillKey = `${main}__${sub}__${name}`
     const count = Number(playerRecord.pills[pillKey]) || 0
 
@@ -2108,169 +2006,94 @@ function calculatePlayerStats() {
     if (count > 0) {
       ATTRIBUTES_MAP.forEach((attr) => {
         const baseValue = Number(item[attr.key])
-
-        if (
-          Number.isFinite(baseValue) &&
-          baseValue !== 0
-        ) {
-          stats[attr.key] += baseValue * count
-        }
+        if ( Number.isFinite(baseValue) && baseValue !== 0
+        ) {stats[attr.key] += baseValue * count }
       })
     }
 
     // 未吃滿 → 願望清單
-    if (limit > 0 && count < limit) {
-      neededList.push({
-        mainCategory: main,
-        subCategory: sub,
-        name: name,
-        needed: limit - count,
+    if (limit > 0 && count < limit) {neededList.push({
+      mainCategory: main,
+      subCategory: sub,
+      name: name,
+      needed: limit - count,
       })
     }
   })
 
   // 2. 卡片 # . 門檻型
   const allHashSubs = [
-    ...new Set(
-      battleDB
-        .filter((item) =>
-          getSubCategoryType([item]).includes('HASH'),
-        )
-        .map((item) =>
-          String(item.小分類 || '').trim(),
+    ...new Set(battleDB.filter((item) =>
+          getSubCategoryType([item]).includes('HASH'), )
+        .map((item) =>String(item.小分類 || '').trim(), ),
         ),
-    ),
   ]
 
   allHashSubs.forEach((sub) => {
     const matchedItem = battleDB.find(
-      (i) =>
-        String(i.小分類 || '').trim() === sub &&
-        getSubCategoryType([i]).includes('HASH'),
-    )
-
+      (i) =>String(i.小分類 || '').trim() === sub &&
+        getSubCategoryType([i]).includes('HASH'), )
     if (matchedItem) {
-      const main = String(
-        matchedItem.主分類 || '',
-      ).trim()
-
-      const savedKey =
-        `THRESHOLD__${main}__${sub}`
-
-      const currentAmount =
-        Number(playerRecord.pills[savedKey]) || 0
-
+      const main = String(matchedItem.主分類 || '',).trim()
+      const savedKey =`THRESHOLD__${main}__${sub}`
+      const currentAmount =Number(playerRecord.pills[savedKey]) || 0
       const result = calculateThresholdStats(
-        main,
-        sub,
-        currentAmount,
-      )
-
+        main,sub,currentAmount, )
       Object.entries(result.activeStats).forEach(
-        ([key, val]) => {
-          stats[key] += val
-        },
+        ([key, val]) => {stats[key] += val },
       )
     }
   })
 
   // 3. 卡片 B . 等級型
   const subBItems = battleDB.filter(
-    (item) =>
-      getSubCategoryType([item]).includes('TYPE_B'),
-  )
-
+    (item) =>getSubCategoryType([item]).includes('TYPE_B'),)
   const uniqueGroups = []
   const groupSet = new Set()
-
   subBItems.forEach((item) => {
-    const mainCategory = String(
-      item.主分類 || '',
-    ).trim()
-
-    const subCategory = String(
-      item.小分類 || '',
-    ).trim()
-
-    const groupKey =
-      `${mainCategory}__${subCategory}`
-
-    if (!groupSet.has(groupKey)) {
-      groupSet.add(groupKey)
-
-      uniqueGroups.push({
-        mainCategory,
-        subCategory,
-      })
+    const mainCategory = String(item.主分類 || '', ).trim()
+    const subCategory = String(item.小分類 || '',).trim()
+    const groupKey =`${mainCategory}__${subCategory}`
+    if (!groupSet.has(groupKey)) {groupSet.add(groupKey)
+      uniqueGroups.push({mainCategory,subCategory, })
     }
   })
 
   uniqueGroups.forEach(
     ({ mainCategory, subCategory }) => {
-      const result =
-        calculateSubCategoryBStats(
-          mainCategory,
-          subCategory,
-        )
-
+      const result =calculateSubCategoryBStats(
+          mainCategory,subCategory, )
       if (result && result.activeStats) {
-        Object.entries(
-          result.activeStats,
+        Object.entries(result.activeStats,
         ).forEach(([key, val]) => {
-          if (stats[key] !== undefined) {
-            stats[key] += Number(val) || 0
-          }
+          if (stats[key] !== undefined) {stats[key] += Number(val) || 0}
         })
       }
     },
   )
 
   // 4. 卡片 Y . 輸入型
-  const subYItems = battleDB.filter(
-    (item) =>
-      getSubCategoryType([item]).includes('TYPE_Y'),
-  )
-
+  const subYItems = battleDB.filter((item) =>
+      getSubCategoryType([item]).includes('TYPE_Y'),)
   const uniqueYGroups = []
   const yGroupSet = new Set()
-
   subYItems.forEach((item) => {
-    const mainCategory = String(
-      item.主分類 || '',
-    ).trim()
-
-    const subCategory = String(
-      item.小分類 || '',
-    ).trim()
-
-    const groupKey =
-      `${mainCategory}__${subCategory}`
-
-    if (!yGroupSet.has(groupKey)) {
-      yGroupSet.add(groupKey)
-
-      uniqueYGroups.push({
-        mainCategory,
-        subCategory,
-      })
+    const mainCategory = String(item.主分類 || '',).trim()
+    const subCategory = String(item.小分類 || '',).trim()
+    const groupKey =`${mainCategory}__${subCategory}`
+    if (!yGroupSet.has(groupKey)) {yGroupSet.add(groupKey)
+      uniqueYGroups.push({mainCategory,subCategory,})
     }
   })
 
   uniqueYGroups.forEach(
     ({ mainCategory, subCategory }) => {
-      const result =
-        calculateSubCategoryYStats(
-          mainCategory,
-          subCategory,
-        )
-
+      const result =calculateSubCategoryYStats(
+          mainCategory,subCategory,)
       if (result && result.activeStats) {
-        Object.entries(
-          result.activeStats,
+        Object.entries(result.activeStats,
         ).forEach(([key, val]) => {
-          if (stats[key] !== undefined) {
-            stats[key] += Number(val) || 0
-          }
+          if (stats[key] !== undefined) {stats[key] += Number(val) || 0}
         })
       }
     },
@@ -2278,10 +2101,10 @@ function calculatePlayerStats() {
 
   // 清理數值小數點
   Object.keys(stats).forEach((key) => {
-    stats[key] = cleanNumber(stats[key], 6)
-  })
+    stats[key] = cleanNumber(stats[key], 6) })
   return {stats,neededList,}
 }
+
 // ==============================================
 // 開關統計窗
 // ==============================================
@@ -2300,6 +2123,7 @@ function toggleModal(show) {
     statsModal.style.display = 'none'
   }
 }
+
 // ==============================================
 // 關閉「已吃丹藥」面板
 // ==============================================
@@ -2322,7 +2146,6 @@ function updateStatsModal() {
     calculatePlayerStats()
   console.log('⚔️ 戰力統計結果:',JSON.stringify(stats, null, 2), )
   console.log('📋 剩餘需求:', neededList)
-
   // ============================================
   // ① 總累計戰力
   // ============================================
@@ -2346,119 +2169,64 @@ function updateStatsModal() {
         `
       })
       .join('')
-
-
   // ============================================
   // ② 已吃丹藥小入口
   // ============================================
   const eatenContainer =
     document.getElementById('eaten-pill-entry')
-
   if (eatenContainer) {
-
     eatenContainer.innerHTML = `
       <label class="eaten-pill-toggle">
-        <input
-          type="checkbox"
-          id="show-eaten-pills"
-        >
+        <input type="checkbox" id="show-eaten-pills">
         <span>已吃丹藥</span>
-      </label>
-    `
-
+      </label>`
     const eatenCheckbox =
       document.getElementById('show-eaten-pills')
 
-
     if (eatenCheckbox) {
-
-      // ★ 每次重新渲染都強制預設關閉
+      // 每次重新渲染都強制預設關閉
       eatenCheckbox.checked = false
-
-      eatenCheckbox.addEventListener(
-        'change',
+      eatenCheckbox.addEventListener('change',
         function () {
-
-          if (this.checked) {
-            openEatenPillsPanel()
-          } else {
-            closeEatenPillsPanel()
-          }
-
+          if (this.checked) {openEatenPillsPanel()
+          } else {closeEatenPillsPanel() }
         },
       )
     }
   }
-
-  // ★ 確保打開戰力統計時，
-  // ★ 已吃丹藥獨立面板一定是關閉的
+  // 確保打開戰力統計時，已吃丹藥獨立面板一定是關閉的
   closeEatenPillsPanel()
-
-  // ============================================
-  // ③ 未吃丹藥
-  // 永遠顯示
-  // ============================================
+  // ③ 未吃丹藥// 永遠顯示
   const neededContainer =
     document.getElementById('stat-needed-list')
-
   if (neededList.length === 0) {
-
     neededContainer.innerHTML = `
       <li style="color:#16a34a;">
         🎉 恭喜！所有丹藥均已食用完畢！
       </li>`
-
   } else {
-
-    neededContainer.innerHTML =
-      neededList
-        .map(
-          (item) => `
-            <li>
+    neededContainer.innerHTML = neededList
+        .map((item) => `<li>
               <strong>${item.name}:</strong>
               還需 ${item.needed} 顆
-            </li>
-          `,
-        )
+            </li>`, )
         .join('')
   }
 
-  // ============================================
-  // ④ PDF 專用：已吃丹藥
-  // 螢幕不顯示，只有列印 / PDF 使用
-  // ============================================
-  const eatenPills =
-    getEatenPills()
-
+  // ④ PDF 專用：已吃丹藥 // 螢幕不顯示，只有列印 / PDF 使用
+  const eatenPills = getEatenPills()
   const printEatenList =
-    document.getElementById(
-      'print-eaten-pills-list',
-    )
-
+    document.getElementById('print-eaten-pills-list', )
   if (printEatenList) {
-
     printEatenList.innerHTML =
       eatenPills.length > 0
-
         ? eatenPills
-            .map(
-              (item) => `
-                <div class="eaten-pill-row">
+            .map((item) => `<div class="eaten-pill-row">
                   <span>${item.name}</span>
-                  <strong>
-                    ${item.count}/${item.limit}
-                  </strong>
-                </div>
-              `,
-            )
+                  <strong>${item.count}/${item.limit}</strong>
+                </div>`,  )
             .join('')
-
-        : `
-            <div>
-              尚未食用丹藥
-            </div>
-          `
-  }
+        : `<div>尚未食用丹藥</div>`}
 }
 
 
@@ -2467,42 +2235,24 @@ function updateStatsModal() {
 // ==============================================
 function getEatenPills() {
   const eatenPills = []
-
   battleDB.forEach((item) => {
     // 只處理一般 NUMBER 丹藥
-    if (!getSubCategoryType([item]).includes('NUMBER')) {
-      return
-    }
-
+    if (!getSubCategoryType([item]).includes('NUMBER')) {return }
     const name = String(item.名稱 || '')
     const main = String(item.主分類 || '')
     const sub = String(item.小分類 || '').trim()
-
     const limit = parseMaxLimit(item.上限) || 0
-
     if (limit <= 0) return
-
-    const pillKey =
-      `${main}__${sub}__${name}`
-
+    
+    const pillKey =`${main}__${sub}__${name}`
     const savedCount =
       Number(playerRecord.pills[pillKey]) || 0
+    const count = Math.max(0,Math.min(savedCount, limit), )
 
-    const count = Math.max(
-      0,
-      Math.min(savedCount, limit),
-    )
-
-    // 沒吃的不要顯示
+    // 沒吃的不顯示
     if (count <= 0) return
-
-    eatenPills.push({
-      name,
-      count,
-      limit,
-    })
+    eatenPills.push({name,count,limit, })
   })
-
   return eatenPills
 }
 
@@ -2510,67 +2260,42 @@ function getEatenPills() {
 // 開啟「已吃丹藥」面板
 // ==============================================
 function openEatenPillsPanel() {
-  let panel =
-    document.getElementById('eaten-pills-panel')
-
+  let panel =document.getElementById('eaten-pills-panel')
   // 如果面板不存在，就建立
   if (!panel) {
     panel = document.createElement('div')
     panel.id = 'eaten-pills-panel'
     panel.className = 'eaten-pills-panel'
-
     document.body.appendChild(panel)
   }
-
   const eatenPills = getEatenPills()
-
   panel.innerHTML = `
     <div class="eaten-pills-box">
-
       <div class="eaten-pills-title">
         <span>📋 已吃丹藥</span>
-
-        <button
-          type="button"
+        <button type="button"
           class="eaten-pills-close"
-          onclick="closeEatenPillsPanel()"
-        >
+          onclick="closeEatenPillsPanel()">
           ✕
         </button>
       </div>
 
       <div class="eaten-pills-content">
-
-        ${
-          eatenPills.length > 0
+        ${eatenPills.length > 0
             ? eatenPills
-                .map(
-                  (item) => `
+                .map((item) => `
                     <div class="eaten-pill-row">
                       <span>${item.name}</span>
-                      <strong>
-                        ${item.count}/${item.limit}
-                      </strong>
-                    </div>
-                  `,
-                )
+                      <strong>${item.count}/${item.limit}</strong>
+                    </div>`, )
                 .join('')
-            : `
-              <div class="eaten-pills-empty">
+            : `<div class="eaten-pills-empty">
                 尚未食用丹藥
-              </div>
-            `
-        }
-
+              </div>`}
       </div>
-
-    </div>
-  `
-
+    </div> `
   panel.style.display = 'flex'
 }
-
-
 
 
 
@@ -2581,37 +2306,24 @@ function openEatenPillsPanel() {
 function generateShareText() {
   const { stats, neededList } =
     calculatePlayerStats()
+  const eatenPills =getEatenPills()
+  const pName =playerRecord.playerName || '無名大俠'
+  let text =`【大俠：${pName} 的戰力統計】\n\n`
 
-  const eatenPills =
-    getEatenPills()
-
-  const pName =
-    playerRecord.playerName || '無名大俠'
-
-  let text =
-    `【大俠：${pName} 的戰力統計】\n\n`
-
-  // ============================================
   // ① 總累計戰力
-  // ============================================
   text += `【總累計戰力】\n`
-
   Object.entries(stats).forEach(
     ([attr, val]) => {
       const displayValue =
         PERCENT_ATTRIBUTES.includes(attr)
           ? `${cleanNumber(val * 100, 6)}%`
           : cleanNumber(val)
-
       text += `${attr}: ${displayValue}\n`
     },
   )
 
-  // ============================================
   // ② 已吃丹藥
-  // ============================================
   text += `\n【已吃丹藥】\n`
-
   if (eatenPills.length === 0) {
     text += `尚未食用丹藥\n`
   } else {
@@ -2620,11 +2332,8 @@ function generateShareText() {
     })
   }
 
-  // ============================================
   // ③ 未吃丹藥 / 願望清單
-  // ============================================
   text += `\n【剩餘需求 / 願望清單】\n`
-
   if (neededList.length === 0) {
     text += `丹藥已全數吃滿！\n`
   } else {
@@ -2681,14 +2390,12 @@ function importDataBackup(event) {
               downloadAnchor.click()
               downloadAnchor.remove()
             }
-
             // 複製文字到剪貼簿
             function copyShareText() {
               navigator.clipboard
                 .writeText(generateShareText())
                 .then(() => showToast('📋 文字已複製！'))
             }
-
             // 分享 API (支援手機彈出 LINE / 簡訊等)
             async function shareToLineOrOther() {
               if (navigator.share) {
@@ -2698,9 +2405,7 @@ function importDataBackup(event) {
                     text: generateShareText(),
                   })
                 } catch (err) {}
-              } else {
-                copyShareText()
-              }
+              } else {copyShareText()  }
             }
 
 // 下載記事本 (.txt) - 支援 Windows 換行
@@ -2748,7 +2453,7 @@ function exportSelectedFormat() {
 }
 
 // ==============================================
-            //-- 共用邏輯函數
+     //-- 共用邏輯函數
 // ==============================================
 //-- 原始效果 (畫面)
 function getItemEffects(item) {
@@ -2804,18 +2509,26 @@ document.addEventListener('DOMContentLoaded', () => {
                 nameInput.addEventListener('change', savePlayerName)
                 nameInput.addEventListener('blur', savePlayerName)
               }
-              const searchInput = document.getElementById('pill-search')
-              if (searchInput) {
-                searchInput.addEventListener('input', () => {
-                  pillSearchText = searchInput.value.trim().toLowerCase()
-                  const activeMain = document.querySelector('.main-tab.active')
-                  const activeSub = document.querySelector('.sub-btn.active')
-                  renderBattleItems(
-                    activeMain ? activeMain.textContent.trim() : '',
-                    activeSub ? activeSub.textContent.trim() : '',
-                  )
-                })
-              }
+              
+// 初始化 searchInput 事件監聽：
+const searchInput = document.getElementById('pill-search')
+if (searchInput) {
+  searchInput.addEventListener('input', () => {
+    pillSearchText = searchInput.value.trim().toLowerCase()
+    if (pillSearchText !== '') {
+      // 有搜尋字詞時，傳入空字串表示「開啟全域搜尋」
+      renderBattleItems('', '')
+    } else {// 搜尋框清空時，恢復顯示當前選取的分類
+      const activeMain = document.querySelector('.main-tab.active')
+      const activeSub = document.querySelector('.sub-btn.active')
+      renderBattleItems(
+        activeMain ? activeMain.textContent.trim() : '',
+        activeSub ? activeSub.textContent.trim() : ''
+      )
+    }
+  })
+}
+
 loadBattleStats() //載入資料庫
 })
 
