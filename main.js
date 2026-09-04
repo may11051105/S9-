@@ -18,10 +18,10 @@ async function loadProducts() {
     try {
       processData(JSON.parse(cache));
       render();
-    } catch (e) {
-      console.warn("快取解析失敗，準備向 Firebase 重新抓取");
-    }
+    } catch (e) {console.warn("快取解析失敗，準備向 Firebase 重新抓取");}
   }
+  
+  recordDailyVisitor(); //👤記錄訪客
   await fetchLatestData();
 }
 
