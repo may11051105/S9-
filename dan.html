@@ -673,9 +673,15 @@ scroll-behavior: smooth;/* 平滑滾動效果 */
   }
   /* 不要讓瀏覽器自動縮放內容 */
   * {box-sizing: border-box;}
-
 }
-
+/*訪客*/
+#visitor-count {
+  position: fixed;
+  right: 10px;
+  bottom: 8px;
+  color: #888;
+  z-index: 9999;
+}
 </style>
 
 
@@ -831,9 +837,11 @@ scroll-behavior: smooth;/* 平滑滾動效果 */
         💾備份檔案｜若需要跨電腦保存，建議下載備份(.json)。
       </button>
       <p style="text-align:center;"><a href="#top">↑ 回分類 ↑</a></p>
+<div id="visitor-count"><!--👤計數--></div>
 </div><!--結尾 結束籤-->
-    
 
+    
+    
 <script>
 let battleDB = []
 let pillSearchText = ''
@@ -860,17 +868,17 @@ const PERCENT_ATTRIBUTES = ['爆擊','爆傷','抗爆','命中','閃避','反擊
 function cleanNumber(value, decimals = 10) {
 if (!Number.isFinite(Number(value))) return 0
 return Number(Number(value).toFixed(decimals))}
-// 共用: 格式化 戰力效果：0.03 → 3%
+// 共用.格式化戰力小計：0.03 → 3%
 function formatEffect(label, value) {
 if (value === null || value === undefined) return ''
 const num = cleanNumber(value)
 if (num === 0) return ''
 const percentKeys = ['爆擊','爆傷','抗爆','命中','閃避','反擊',]
-        // label 可能是「爆擊」或「爆」
+// label 可能是「爆擊」或「爆」
 const isPercent =percentKeys.includes(label) ||
 ['爆', '爆傷', '抗爆', '命中', '閃', '反'].includes(label)
-        if (isPercent) {return `${label}+${cleanNumber(num * 100, 6)}%,`}
-        return `${label}+${cleanNumber(num)},`
+        if (isPercent) {return `${label}:${cleanNumber(num * 100, 6)}%,`}
+        return `${label}:${cleanNumber(num)},`
 }
 
 // ==============================================
@@ -1280,8 +1288,8 @@ const baseNum = Number(item[attr.key])
 if (!Number.isFinite(baseNum) || baseNum === 0) return
 const total = cleanNumber(baseNum * count)
 if (['爆', '爆傷', '抗爆', '命中', '閃', '反'].includes(attr.short)
-      ) {totalEffects.push(`${attr.short}+${cleanNumber(total * 100, 6)}%,`,)
-      } else {totalEffects.push(`${attr.short}+${cleanNumber(total)},`)}
+      ) {totalEffects.push(`${attr.short}:${cleanNumber(total * 100, 6)}%,`,)
+      } else {totalEffects.push(`${attr.short}:${cleanNumber(total)},`)}
           })
 return totalEffects.length > 0 ? totalEffects.join(' ') : '無關戰力'//若計算屬性都沒設定
 }
@@ -1303,8 +1311,7 @@ function renderNormalPillCard(item) {
   const card = document.createElement('div')
   card.className = 'card'
 
-card.innerHTML = `
-  <table class="pill-table">
+card.innerHTML = `<table class="pill-table">
     <tr>
       <td class="pill-name">${name}</td>
       <td class="pill-effect">${effectText}</td>
@@ -1317,8 +1324,7 @@ card.innerHTML = `
 
       <td class="pill-total">${totalEffectText}</td>
     </tr>
-  </table>
-`
+  </table>`
 
 const countCell = card.querySelector('.pill-count')
 if (countCell) {countCell.prepend(
@@ -1569,7 +1575,7 @@ function renderThresholdCard(mainCategory, subCategory) {
         card.className = 'card'
         card.innerHTML = `
           <div style="font-weight:bold;text-align: right;padding:5px;">
-            📊 ${subCategory} 完成：
+            📊 當前：
             <input type="number" class="pill-count-input"
               id="threshold-input"
               value="${currentAmount}"
@@ -1579,7 +1585,7 @@ function renderThresholdCard(mainCategory, subCategory) {
           <table class="pill-table">
             <thead>
               <tr>
-                <th>門檻項目</th>
+                <th>${subCategory} 進度</th>
                 <th>獲得效果</th>
                 <th class="pill-state" style="width:50px;"> 狀態</th>
               </tr>
@@ -2220,6 +2226,45 @@ function ensurePlayerName() {
               return currentName
 }
 
+// ==============================================
+// 戰力統計.訪客統計//同一裝置一天只計一次
+// ==============================================
+function recordBattleVisitor() {
+  const today = new Date()
+  const todayKey =
+    today.getFullYear() +'-' +
+    String(today.getMonth() + 1).padStart(2, '0') +'-' +
+    String(today.getDate()).padStart(2, '0')
+
+  const visitorKey = 'jin_mall_visitor_battle'
+  const lastVisitDate = localStorage.getItem(visitorKey)
+  const visitorRef = dbFirebase.ref('settings/visitor/戰力')
+
+  // 今天記錄過
+  if (lastVisitDate === todayKey) {
+    visitorRef.once('value').then((snapshot) => {
+      updateBattleVisitorDisplay(snapshot.val())
+    })
+    return
+  }
+  // 今天第一次進入 → +1
+  visitorRef
+    .transaction((currentValue) => {
+      return (Number(currentValue) || 0) + 1})
+    .then((result) => {
+      localStorage.setItem(visitorKey, todayKey)
+      updateBattleVisitorDisplay(result.snapshot.val())
+      console.log('👤 今日戰力訪客已記錄')})
+    .catch((error) => {console.warn('⚠️ 戰力訪客統計失敗：', error)})
+}
+
+// 戰力訪客總數
+function updateBattleVisitorDisplay(count) {
+  const el = document.getElementById('visitor-count')
+  if (!el) return
+  el.textContent = `➤ ${Number(count) || 0}`
+}
+
 
 
 // ==============================================
@@ -2651,35 +2696,41 @@ function showToast(message) {
               }, 5000)
 }
 
-// 初始化
-document.addEventListener('DOMContentLoaded', () => {
-              loadPlayerRecord()
-              const nameInput = document.getElementById('player-name')
-              if (nameInput) {
-                nameInput.addEventListener('change', savePlayerName)
-                nameInput.addEventListener('blur', savePlayerName)
-              }
-              
-// 搜索.searchInput 事件監聽：
-const searchInput = document.getElementById('pill-search')
-if (searchInput) {
-  searchInput.addEventListener('input', () => {
-    pillSearchText = searchInput.value.trim().toLowerCase()
-    if (pillSearchText !== '') {
-      // 有搜尋字詞時，傳入空字串表示「開啟全域搜尋」
-      renderBattleItems('', '')
-    } else {// 搜尋框清空時，恢復顯示當前選取的分類
-      const activeMain = document.querySelector('.main-tab.active')
-      const activeSub = document.querySelector('.sub-btn.active')
-      renderBattleItems(
-        activeMain ? activeMain.textContent.trim() : '',
-        activeSub ? activeSub.textContent.trim() : ''
-      )
-    }
-  })
-}
 
-loadBattleStats() //載入資料庫
+// ==============================================
+// 初始化
+// ==============================================
+document.addEventListener('DOMContentLoaded', () => {
+loadPlayerRecord() //讀取角色資料
+recordBattleVisitor() //訪客紀錄
+
+  const nameInput = document.getElementById('player-name')
+  if (nameInput) {
+    nameInput.addEventListener('change', savePlayerName)
+    nameInput.addEventListener('blur', savePlayerName)
+  }
+
+  // 搜索.searchInput 事件監聽：
+  const searchInput = document.getElementById('pill-search')
+  if (searchInput) {
+    searchInput.addEventListener('input', () => {
+      pillSearchText = searchInput.value.trim().toLowerCase()
+
+      if (pillSearchText !== '') {
+        renderBattleItems('', '')
+      } else {
+        const activeMain = document.querySelector('.main-tab.active')
+        const activeSub = document.querySelector('.sub-btn.active')
+
+        renderBattleItems(
+          activeMain ? activeMain.textContent.trim() : '',
+          activeSub ? activeSub.textContent.trim() : ''
+        )
+      }
+    })
+  }
+
+  loadBattleStats() // 載入資料庫
 })
 
     </script>
