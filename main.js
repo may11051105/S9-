@@ -636,6 +636,60 @@ function checkPassword() {
   }
 }
 
+
+// ==============================================
+// 每日訪客：同裝置一天只計一次
+// ==============================================
+function recordDailyVisitor() {
+  const node = CONFIG.firebaseNode;
+  const today = new Date();
+
+  const todayKey =
+    today.getFullYear() +
+    '-' +
+    String(today.getMonth() + 1).padStart(2, '0') +
+    '-' +
+    String(today.getDate()).padStart(2, '0');
+
+  const visitorKey = `jin_mall_visitor_${node}`;
+  const lastVisitDate = getSafeCache(visitorKey);
+
+  const visitorRef = dbFirebase.ref(`settings/visitor/${node}`);
+
+  // 今天已經記錄過
+  if (lastVisitDate === todayKey) {
+    visitorRef.once('value').then((snapshot) => {
+      updateVisitorDisplay(snapshot.val());
+    });
+    return;
+  }
+
+  // 今天還沒記錄 → +1
+  visitorRef
+    .transaction((currentValue) => {
+      return (Number(currentValue) || 0) + 1;
+    })
+    .then((result) => {
+      setSafeCache(visitorKey, todayKey);
+
+      updateVisitorDisplay(result.snapshot.val());
+
+      console.log(`👤 今日訪客已記錄：[${node}]`);
+    })
+    .catch((error) => {
+      console.warn('⚠️ 訪客統計失敗：', error);
+    });
+}
+
+// 目前訪客數
+function updateVisitorDisplay(count) {
+  const el = document.getElementById('visitor-count');
+  if (!el) return;
+//el.textContent = Number(count) || 0; //純數字
+  el.textContent = `➤${Number(count) || 0}`;
+}
+
+
 //-- TOP按鈕：監聽捲動事件，決定何時跳出按鈕
 window.onscroll = function () {
   const btn = document.getElementById("btnTop");
